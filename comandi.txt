@@ -249,6 +249,48 @@ non eseguire altri Set-Date. Riparti con una NUOVA sessione dell'orchestratore.
 Se lo scarto e ancora di ore, invia queste tre righe: non invertire la copia.
 
 NOTA
+
+
+
+
+
+
+
+COLLAUDO - MONETA FUNZIONA, INDIVIDUARE ERRORE PE-SIEVE
+
+Il riepilogo mostrato contiene 19 SCAN_COMPLETED di Moneta.
+PE-sieve ha 27 SCAN_PARTIAL_OR_ERROR e nessuna SCAN_COMPLETED.
+Non cambiare policy o esclusioni: il binario PE-sieve parte.
+Attendere la fine dell'esportazione prima di chiudere l'orchestratore.
+
+Dopo la fine, aprire Windows PowerShell NELLA CARTELLA CON AVVIA.cmd.
+Copiare l'intero blocco. Legge soltanto i risultati PE-sieve gia prodotti.
+
+& {
+    $sessionePe = Get-ChildItem .\sessioni -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if (-not $sessionePe) { throw 'Nessuna sessione trovata.' }
+    $filePe = Join-Path $sessionePe.FullName 'monitoraggio\eventi_memoria.jsonl'
+    $eventiPe = @(Get-Content -LiteralPath $filePe | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.sensor -eq 'pe-sieve' })
+    Write-Output ('Sessione: ' + $sessionePe.FullName)
+    Write-Output 'ERRORI PE-SIEVE:'
+    $eventiPe | Group-Object status, error | Sort-Object Count -Descending | Select-Object Count, Name | Format-Table -Wrap -AutoSize
+    $esempioPe = $eventiPe | Where-Object { $_.error } | Select-Object -First 1
+    if ($esempioPe) {
+        Write-Output 'ESEMPIO:'
+        $esempioPe | Select-Object pid, target_module, status, error, pe_exit_code, scan_errors, raw_output | Format-List
+        if ($esempioPe.raw_output -and (Test-Path -LiteralPath $esempioPe.raw_output)) {
+            Write-Output 'ULTIME RIGHE DELLO SCANNER:'
+            Get-Content -LiteralPath $esempioPe.raw_output -Tail 40
+        }
+    }
+}
+
+Inviare l'output. Il campo error identifica il controllo che sta fallendo:
+parametri, report mancante, formato differente o scansione incompleta.
+Non impostare scan_completed=true a mano e non ignorare gli errori.
+L'assenza di scansioni globalmente complete non esclude che il sensore abbia
+registrato evidenza specifica su un modulo: va valutata dai singoli record.
+La coda elevata e un tema di copertura da valutare dopo aver risolto PE-sieve.
 Il fuso orario impostato resta configurato dopo il riavvio.
 Questo non crea una sorgente NTP continua: il precedente allineamento SSH
 e una regolazione una tantum. Per stabilita nel tempo servira un server NTP
