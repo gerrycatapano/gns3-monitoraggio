@@ -1,40 +1,70 @@
-PROVA ALERT IN DIRETTA - SENZA FILTRI DI ORARIO O AGENTE
+SINCRONIZZAZIONE OROLOGI - PRIMA DI UNA NUOVA SIMULAZIONE
 
-Non avviare l'orchestratore per questa prova: controlliamo prima il percorso Windows -> Wazuh.
-Non cambia configurazioni. Le attivita Windows creano normalmente processi ed eventi.
+Ferma l'orchestratore prima di correggere gli orologi.
+Esegui una sezione alla volta sulla macchina indicata.
+Non occorre impostare lo stesso fuso orario: deve coincidere l'ora UTC reale.
+Questi comandi modificano/attivano la sincronizzazione oraria.
 
 1. UBUNTU WAZUH MANAGER
-Apri un terminale ed esegui il comando. Lascialo aperto.
-Mostra TUTTI i nuovi alert, anche quelli non relativi alla prova.
 
-sudo tail -n 0 -F /var/ossec/logs/alerts/alerts.json
+Attiva il servizio di sincronizzazione disponibile nel sistema:
 
-2. WINDOWS-HR
-Apri una NUOVA finestra Windows PowerShell.
-Esegui i comandi uno alla volta dopo aver avviato il controllo Ubuntu.
+sudo timedatectl set-ntp true
 
-tasklist.exe
+Attendi circa un minuto, poi controlla:
 
-sc.exe query
+timedatectl status
 
-ipconfig.exe /all
+date -u --iso-8601=seconds
 
-whoami.exe
+Cerca System clock synchronized: yes. NTP service: active da solo non prova
+che l'orologio sia stato sincronizzato.
+Se set-ntp segnala NTP not supported o la sincronizzazione resta no,
+conserva l'output: serve verificare il servizio/sorgente disponibile.
 
-Get-Service | Select-Object -First 5
+2. WINDOWS-HR - WINDOWS POWERSHELL COME AMMINISTRATORE
 
-3. OSSERVA UBUNTU
-Attendi circa 60 secondi dopo i comandi.
-Cerca nelle righe il nome/ID agente Windows-HR e riferimenti alle attivita eseguite.
-Non assumere che ogni comando debba selezionare esattamente un particolare ID regola.
-Ferma soltanto la visualizzazione con Ctrl+C. Non ferma il servizio Wazuh.
+Avvia il servizio Windows Time senza sostituire la sorgente gia configurata:
 
-RISULTATO DA COMUNICARE
-- Compaiono alert della macchina HR associati alla prova?
-- Compaiono solo alert di altre macchine/altre attivita?
-- Non compare alcuna nuova riga?
+Start-Service -Name W32Time
 
-Se la prova produce alert, il percorso di detection funziona e si passa a correggere
-orologi e filtri dell'esportazione. Se non li produce, controllare ricezione/decodifica
-ed effettiva selezione delle regole: la validazione analysisd -t non dimostra
-che uno specifico evento sia arrivato o abbia generato un alert.
+Richiedi sincronizzazione con riscoperta della sorgente:
+
+w32tm.exe /resync /rediscover
+
+Attendi circa un minuto, poi verifica:
+
+w32tm.exe /query /source
+
+w32tm.exe /query /status
+
+(Get-Date).ToUniversalTime().ToString('o')
+
+Se Start-Service segnala che il servizio e disabilitato, oppure resync dice
+che non sono disponibili dati di ora, non proseguire con il test:
+comunica il messaggio e la sorgente restituita da query /source.
+Non cambiare alla cieca i server NTP, i limiti di correzione o le policy del dominio.
+Se Windows usa il controller di dominio, anche il suo orologio deve essere corretto.
+
+3. CONFRONTO FINALE
+
+Esegui a pochi secondi di distanza:
+
+Su Ubuntu:
+
+date -u --iso-8601=seconds
+
+Su Windows PowerShell:
+
+(Get-Date).ToUniversalTime().ToString('o')
+
+Data, ore e minuti devono coincidere; i secondi differiranno del tempo
+impiegato a passare tra le due console. Confronta anche con l'ora reale UTC.
+Se restano ore di differenza, invia gli output prima di fare altre modifiche.
+
+4. NUOVA PROVA
+
+Solo dopo aver verificato l'allineamento, avvia una NUOVA sessione con AVVIA.cmd,
+attendi il controllo iniziale, esegui i comandi di discovery e usa STOP.
+La correzione non riscrive i timestamp delle sessioni o degli alert gia prodotti.
+Controlla anche che config_hr.json abbia lo stesso agent_id degli alert Windows-HR.
