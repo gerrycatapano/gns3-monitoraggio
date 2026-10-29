@@ -1,26 +1,49 @@
-============================================================
-CONTROLLO EVENTI WINDOWS-HR - SYSMON E POWERSHELL
-============================================================
+VERIFICA RACCOLTA WAZUH - DOPO LA CONFERMA DEGLI EVENTI LOCALI
 
-Questa sezione contiene solo attivita di prova e lettura dei log.
-Aprire Windows PowerShell sulla VM Windows-HR.
-Copiare ogni comando separatamente, su una sola riga.
-Non incollare l'intero comandi.txt: le sezioni precedenti includono
-configurazioni e comandi destinati a macchine diverse.
+Eseguire un comando alla volta, nella macchina indicata.
+Tutti i controlli seguenti sono di lettura/test: non modificano le configurazioni.
+Non incollare l'intero documento in un terminale.
 
-1. ESEGUIRE LE DUE ATTIVITA DI PROVA
+A. WINDOWS-HR - WINDOWS POWERSHELL COME AMMINISTRATORE
 
-tasklist.exe
+1. Mostra i blocchi locali di raccolta. Controllare che siano presenti i due canali:
+Microsoft-Windows-Sysmon/Operational
+Microsoft-Windows-PowerShell/Operational
+Controllare anche eventuali query che escludono gli eventi 1 o 4103.
 
-Get-Service | Select-Object -First 5
+Select-String -LiteralPath 'C:\Program Files (x86)\ossec-agent\ossec.conf' -Pattern '<localfile>' -Context 0,15
 
-2. CERCARE TASKLIST NEGLI ULTIMI 200 EVENTI SYSMON
+2. Stato del servizio agente:
 
-Get-WinEvent -LogName "Microsoft-Windows-Sysmon/Operational" -MaxEvents 200 | Where-Object { $_.Id -eq 1 -and $_.Message -match 'tasklist\.exe' } | Select-Object -First 2 TimeCreated, Id, Message | Format-List
+Get-Service | Where-Object { $_.Name -match 'wazuh|ossec' -or $_.DisplayName -match 'wazuh|ossec' } | Format-Table Name, DisplayName, Status
 
-3. CERCARE GET-SERVICE NEGLI ULTIMI 200 EVENTI POWERSHELL
+3. Ultime righe del log agente. Il file puo contenere indirizzi della rete: non pubblicarlo su GitHub.
 
-Get-WinEvent -LogName "Microsoft-Windows-PowerShell/Operational" -MaxEvents 200 | Where-Object { $_.Id -eq 4103 -and $_.Message -match 'Get-Service' } | Select-Object -First 2 TimeCreated, Id, Message | Format-List
+Get-Content -LiteralPath 'C:\Program Files (x86)\ossec-agent\ossec.log' -Tail 80
 
-RISULTATI DA COMUNICARE
+4. Ora Windows in UTC:
 
+(Get-Date).ToUniversalTime().ToString('o')
+
+B. UBUNTU WAZUH MANAGER - TERMINALE UBUNTU
+
+5. Controlla la configurazione del motore regole. Conservare anche eventuali warning su ID duplicati.
+
+sudo /var/ossec/bin/wazuh-analysisd -t
+
+6. Verifica che le regole custom esistano nella cartella delle regole locali.
+Questo controllo prova la presenza dei file, non che siano stati caricati dal processo attualmente in esecuzione.
+
+sudo grep -R -n -E 'id="(100105|100203|100312)"' /var/ossec/etc/rules
+
+7. Ora Ubuntu in UTC:
+
+date -u --iso-8601=seconds
+
+RISULTATI
+
+Inviare i risultati dei punti 1, 2, 3, 5 e 6.
+Confrontare i punti 4 e 7 eseguiti a breve distanza.
+Gli orari locali possono differire per fuso; quelli UTC dovrebbero essere allineati.
+Non abilitare archives o modificare filtri/regole prima di valutare questi risultati.
+I controlli non diagnosticano gli scanner pe-sieve/Moneta, che sono un percorso separato.
