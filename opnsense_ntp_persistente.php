@@ -1,0 +1,138 @@
+<?php
+// Run ONLY on the OPNsense console as root. Default mode is read-only.
+require_once('script/load_phalcon.php');
+use OPNsense\Core\Config;
+
+function stop_now($message) {
+    throw new RuntimeException($message);
+}
+
+$apply = in_array('--apply', $argv, true);
+$keepSsh = in_array('--keep-existing-ssh', $argv, true);
+$manager = null;
+try {
+    $manager = Config::getInstance();
+    if ($apply) {
+        $manager->lock();
+    }
+    $xml = $manager->object();
+    $interfaces = [];
+    foreach ($xml->interfaces->children() as $name => $entry) {
+        $device = trim((string)$entry->if);
+        if (in_array($device, ['vlan0.40', 'vlan0.99'], true)) {
+            if (isset($interfaces[$device])) {
+                stop_now('Interfaccia ambigua: ' . $device);
+            }
+            $interfaces[$device] = $name;
+        }
+    }
+    if (count($interfaces) !== 2) {
+        stop_now('Non trovate entrambe le interfacce vlan0.40 e vlan0.99. Nessuna modifica.');
+    }
+    $selected = [];
+    $sshPersistent = false;
+    foreach ($xml->filter->rule as $rule) {
+        if (isset($rule->disabled)) {
+            continue;
+        }
+        $iface = trim((string)$rule->interface);
+        $proto = strtolower(trim((string)$rule->protocol));
+        $port = strtolower(trim((string)$rule->destination->port));
+        $type = strtolower(trim((string)$rule->type));
+        $direction = strtolower(trim((string)$rule->direction));
+        if ($type !== 'pass' || isset($rule->floating) ||
+            !in_array($direction, ['', 'in'], true)) {
+            continue;
+        }
+        if ($iface === $interfaces['vlan0.40'] && $proto === 'tcp' &&
+            in_array($port, ['22', 'ssh'], true) &&
+            trim((string)$rule->source->address) === '10.0.40.13' &&
+            trim((string)$rule->destination->address) === '10.0.99.14' &&
+            !isset($rule->source->not) && !isset($rule->destination->not)) {
+            $sshPersistent = true;
+        }
+        foreach ($interfaces as $device => $logical) {
+            if ($iface === $logical && in_array($proto, ['tcp', 'udp'], true) &&
+                in_array($port, ['123', 'ntp'], true) &&
+                trim((string)$rule->ipprotocol) === 'inet' &&
+                trim((string)$rule->source->network) === $logical &&
+                isset($rule->destination->any) &&
+                !isset($rule->source->not) && !isset($rule->destination->not)) {
+                $selected[$device][] = $rule;
+            }
+        }
+    }
+    foreach ($interfaces as $device => $logical) {
+        if (count($selected[$device] ?? []) !== 1) {
+            stop_now('Attesa una sola regola NTP IPv4 di rete su ' . $device . '. Nessuna modifica.');
+        }
+        $rule = $selected[$device][0];
+        printf("NTP %s (%s): %s -> udp; porta e indirizzi invariati\n", $device, $logical, (string)$rule->protocol);
+    }
+    echo 'SSH persistente 10.0.40.13 -> 10.0.99.14:22: ' . ($sshPersistent ? 'presente' : 'assente') . "\n";
+    if (!$apply) {
+        echo "CHECK_OK. Solo anteprima: configurazione non salvata.\n";
+        exit(0);
+    }
+    if (!$sshPersistent && !$keepSsh) {
+        stop_now('SSH presente solo temporaneamente: usare --keep-existing-ssh per preservare lo stesso accesso.');
+    }
+    if (!$sshPersistent) {
+        $lines = [];
+        $code = 0;
+        exec('/sbin/pfctl -sr 2>&1', $lines, $code);
+        $found = false;
+        foreach ($lines as $line) {
+            if (preg_match('/^pass in quick on vlan0\.40 inet proto tcp from 10\.0\.40\.13 to 10\.0\.99\.14 port = (?:ssh|22)(?:\s|$)/', $line)) {
+                $found = true;
+            }
+        }
+        if ($code !== 0 || !$found) {
+            stop_now('Regola SSH attiva attesa non trovata: nessun nuovo accesso viene creato.');
+        }
+    }
+    $backup = '/conf/gns3-before-ntp-' . gmdate('Ymd-His') . '-' . bin2hex(random_bytes(3)) . '.xml';
+    if (!copy('/conf/config.xml', $backup) || !chmod($backup, 0600)) {
+        stop_now('Backup non riuscito. Nessun salvataggio.');
+    }
+    echo "BACKUP=$backup\n";
+    foreach ($selected as $rules) {
+        $rules[0]->protocol = 'udp';
+    }
+    if (!$sshPersistent) {
+        $new = $xml->filter->addChild('rule');
+        $new->addChild('type', 'pass');
+        $new->addChild('interface', $interfaces['vlan0.40']);
+        $new->addChild('ipprotocol', 'inet');
+        $new->addChild('protocol', 'tcp');
+        $new->addChild('direction', 'in');
+        $new->addChild('log', '1');
+        $source = $new->addChild('source');
+        $source->addChild('address', '10.0.40.13');
+        $destination = $new->addChild('destination');
+        $destination->addChild('address', '10.0.99.14');
+        $destination->addChild('port', '22');
+        $new->addChild('descr', 'GNS3 preserve existing Windows-HR to Wazuh SSH access');
+        $node = dom_import_simplexml($new);
+        $firstRule = dom_import_simplexml($xml->filter->rule[0]);
+        if ($node !== $firstRule) {
+            $node->parentNode->insertBefore($node, $firstRule);
+        }
+    }
+    if (!$manager->isValid()) {
+        stop_now('Modello configurazione non valido. Nessun salvataggio.');
+    }
+    $manager->save(['description' => 'GNS3: correct HR/Wazuh NTP to UDP; preserve existing SSH access']);
+    $manager->unlock();
+    $disk = simplexml_load_file('/conf/config.xml');
+    if ($disk === false) {
+        stop_now('Verifica XML dopo salvataggio fallita. Ripristinare il backup dalla console.');
+    }
+    echo "CONFIG_SAVED. Ora applicare con configctl filter reload e verificare le regole attive.\n";
+} catch (Throwable $error) {
+    if ($manager !== null && $apply) {
+        $manager->unlock();
+    }
+    fwrite(STDERR, 'ERRORE: ' . $error->getMessage() . "\n");
+    exit(1);
+}
