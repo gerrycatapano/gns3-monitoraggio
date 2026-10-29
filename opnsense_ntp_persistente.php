@@ -9,8 +9,13 @@ function stop_now($message) {
 
 $apply = in_array('--apply', $argv, true);
 $keepSsh = in_array('--keep-existing-ssh', $argv, true);
+$ntpOnly = in_array('--ntp-only', $argv, true);
+$addSsh = in_array('--add-ssh', $argv, true);
 $manager = null;
 try {
+    if (($keepSsh && $ntpOnly) || ($addSsh && $ntpOnly)) {
+        stop_now('La modalita --ntp-only non puo essere combinata con opzioni SSH.');
+    }
     $manager = Config::getInstance();
     if ($apply) {
         $manager->lock();
@@ -29,7 +34,7 @@ try {
     if (count($interfaces) !== 2) {
         stop_now('Non trovate entrambe le interfacce vlan0.40 e vlan0.99. Nessuna modifica.');
     }
-    echo "VERSION=2_ADD_HOST_NTP\n";
+    echo "VERSION=4_ADD_NTP_AND_AUTHORIZED_SSH\n";
     if (!isset($xml->filter)) {
         stop_now('Sezione filter legacy assente. Nessuna modifica.');
     }
@@ -74,14 +79,20 @@ try {
         printf("NTP %s (%s): %s -> any UDP 123: %s\n", $device, $logical, $hosts[$device], empty($selected[$device]) ? 'DA AGGIUNGERE' : 'GIA PRESENTE');
     }
     echo 'SSH persistente 10.0.40.13 -> 10.0.99.14:22: ' . ($sshPersistent ? 'presente' : 'assente') . "\n";
+    if ($ntpOnly) {
+        echo "MODALITA=NTP_ONLY. Nessuna regola SSH viene aggiunta o modificata.\n";
+    }
+    if ($addSsh) {
+        echo 'SSH 10.0.40.13 -> 10.0.99.14 TCP 22: ' . ($sshPersistent ? 'GIA PRESENTE' : 'DA AGGIUNGERE IN MODO PERSISTENTE') . "\n";
+    }
     if (!$apply) {
         echo "CHECK_OK. Solo anteprima: configurazione non salvata.\n";
         exit(0);
     }
-    if (!$sshPersistent && !$keepSsh) {
-        stop_now('SSH presente solo temporaneamente: usare --keep-existing-ssh per preservare lo stesso accesso.');
+    if (!$sshPersistent && !$keepSsh && !$ntpOnly && !$addSsh) {
+        stop_now('Scegliere --add-ssh per aggiungere SSH, --ntp-only per solo NTP, oppure --keep-existing-ssh per preservare un permesso attivo.');
     }
-    if (!$sshPersistent) {
+    if (!$sshPersistent && $keepSsh && !$addSsh) {
         $lines = [];
         $code = 0;
         exec('/sbin/pfctl -sr 2>&1', $lines, $code);
@@ -123,7 +134,7 @@ try {
             $node->parentNode->insertBefore($node, $firstRule);
         }
     }
-    if (!$sshPersistent) {
+    if (!$sshPersistent && ($keepSsh || $addSsh)) {
         $new = $xml->filter->addChild('rule');
         $new->addChild('type', 'pass');
         $new->addChild('interface', $interfaces['vlan0.40']);
@@ -136,7 +147,7 @@ try {
         $destination = $new->addChild('destination');
         $destination->addChild('address', '10.0.99.14');
         $destination->addChild('port', '22');
-        $new->addChild('descr', 'GNS3 preserve existing Windows-HR to Wazuh SSH access');
+        $new->addChild('descr', 'GNS3 authorized Windows-HR to Wazuh SSH access');
         $node = dom_import_simplexml($new);
         $firstRule = dom_import_simplexml($xml->filter->rule[0]);
         if ($node !== $firstRule) {
@@ -146,7 +157,7 @@ try {
     if (!$manager->isValid()) {
         stop_now('Modello configurazione non valido. Nessun salvataggio.');
     }
-    $manager->save(['description' => 'GNS3: add host-specific NTP UDP rules; preserve existing SSH access']);
+    $manager->save(['description' => $ntpOnly ? 'GNS3: add host-specific NTP UDP rules only' : 'GNS3: host-specific NTP UDP and authorized HR to Wazuh SSH']);
     $manager->unlock();
     $disk = simplexml_load_file('/conf/config.xml');
     if ($disk === false) {
