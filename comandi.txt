@@ -100,3 +100,38 @@ Solo dopo aver verificato l'allineamento, avvia una NUOVA sessione con AVVIA.cmd
 attendi il controllo iniziale, esegui i comandi di discovery e usa STOP.
 La correzione non riscrive i timestamp delle sessioni o degli alert gia prodotti.
 Controlla anche che config_hr.json abbia lo stesso agent_id degli alert Windows-HR.
+
+
+VERIFICA ACCESSO NTP DELLE VM - SOLO LETTURA
+
+Non avviare ancora una nuova simulazione. Eseguire ciascuna sezione
+solo sulla macchina indicata. Questi comandi non cambiano orologi o firewall.
+
+WINDOWS-HR - WINDOWS POWERSHELL
+
+1. Verifica risoluzione DNS IPv4 della sorgente gia configurata:
+
+Resolve-DnsName time.windows.com -Type A
+
+2. Richiedi cinque campioni NTP senza cambiare l'orologio:
+
+w32tm.exe /stripchart /computer:time.windows.com /dataonly /samples:5
+
+Nota: stripchart e il servizio Windows Time possono usare porte sorgenti diverse.
+Un successo qui non garantisce da solo che il servizio resync funzioni.
+
+UBUNTU WAZUH MANAGER - TERMINALE LINUX
+
+3. Mostra gli indirizzi IPv4 della sorgente Ubuntu:
+
+getent ahostsv4 ntp.ubuntu.com
+
+4. Mostra i messaggi recenti del servizio di sincronizzazione:
+
+sudo journalctl -u systemd-timesyncd -n 30 --no-pager
+
+Inviare i risultati. Ubuntu al momento ha selezionato un indirizzo IPv6:
+questo non dimostra da solo che IPv6 sia la causa.
+Non usare Test-NetConnection -Port 123 per verificare NTP: quel controllo
+prova TCP, mentre NTP utilizza UDP 123.
+Start-Service e un comando Windows PowerShell, non Ubuntu.
