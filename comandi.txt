@@ -1,58 +1,26 @@
-Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force
+============================================================
+CONTROLLO EVENTI WINDOWS-HR - SYSMON E POWERSHELL
+============================================================
 
-Get-ChildItem .\sensors -Filter *.ps1 -File |
-    Unblock-File
+Questa sezione contiene solo attivita di prova e lettura dei log.
+Aprire Windows PowerShell sulla VM Windows-HR.
+Copiare ogni comando separatamente, su una sola riga.
+Non incollare l'intero comandi.txt: le sezioni precedenti includono
+configurazioni e comandi destinati a macchine diverse.
 
-Unblock-File -LiteralPath "C:\Tools\pe-sieve64.exe"
-Unblock-File -LiteralPath "C:\Tools\Moneta64.exe"
+1. ESEGUIRE LE DUE ATTIVITA DI PROVA
 
+tasklist.exe
 
-per togliere
-Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy Undefined
-
-
-$base = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell"
-
-# Module Logging: eventi 4103
-New-Item -Path "$base\ModuleLogging" -Force | Out-Null
-
-New-ItemProperty -Path "$base\ModuleLogging" `
-    -Name "EnableModuleLogging" `
-    -PropertyType DWord -Value 1 -Force | Out-Null
-
-New-Item -Path "$base\ModuleLogging\ModuleNames" -Force | Out-Null
-
-New-ItemProperty -Path "$base\ModuleLogging\ModuleNames" `
-    -Name "*" `
-    -PropertyType String -Value "*" -Force | Out-Null
-
-# Script Block Logging: eventi 4104
-New-Item -Path "$base\ScriptBlockLogging" -Force | Out-Null
-
-New-ItemProperty -Path "$base\ScriptBlockLogging" `
-    -Name "EnableScriptBlockLogging" `
-    -PropertyType DWord -Value 1 -Force | Out-Null
-
-# Abilita il canale operativo
-wevtutil.exe sl "Microsoft-Windows-PowerShell/Operational" /e:true
-
-
-
-prove
-Get-Process | Select-Object -First 5
 Get-Service | Select-Object -First 5
-Get-ChildItem -LiteralPath C:\Users
 
+2. CERCARE TASKLIST NEGLI ULTIMI 200 EVENTI SYSMON
 
+Get-WinEvent -LogName "Microsoft-Windows-Sysmon/Operational" -MaxEvents 200 | Where-Object { $_.Id -eq 1 -and $_.Message -match 'tasklist\.exe' } | Select-Object -First 2 TimeCreated, Id, Message | Format-List
 
-per ssh
+3. CERCARE GET-SERVICE NEGLI ULTIMI 200 EVENTI POWERSHELL
 
-cp /tmp/rules.debug /tmp/rules.ssh.backup
+Get-WinEvent -LogName "Microsoft-Windows-PowerShell/Operational" -MaxEvents 200 | Where-Object { $_.Id -eq 4103 -and $_.Message -match 'Get-Service' } | Select-Object -First 2 TimeCreated, Id, Message | Format-List
 
-awk 'BEGIN{r="pass in quick on vlan0.40 inet proto tcp from 10.0.40.13 to 10.0.99.14 port 22 keep state"} done==0 && ($1=="pass" || $1=="block"){print r;done=1} {print}' /tmp/rules.ssh.backup > /tmp/rules.ssh.temp
+RISULTATI DA COMUNICARE
 
-grep '10.0.40.13' /tmp/rules.ssh.temp
-
-pfctl -nf /tmp/rules.ssh.temp && pfctl -f /tmp/rules.ssh.temp
-
-Test-NetConnection 10.0.99.14 -Port 22
