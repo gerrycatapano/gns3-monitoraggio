@@ -138,50 +138,59 @@ Start-Service e un comando Windows PowerShell, non Ubuntu.
 
 
 
-TIME
-VERIFICA NTP DOPO LE REGOLE PERSISTENTI
+COMANDI ALLINEAMENTO
+ALLINEAMENTO WINDOWS-HR A UBUNTU VIA SSH - SENZA NTP INTERNET
 
-SSH e raggiungibile, ma la sincronizzazione Windows non e ancora riuscita.
-Non cambiare altre regole prima di questa prova. Non serve l'orchestratore.
+Per una prova breve e controllata usiamo Ubuntu Wazuh come riferimento
+comune. Questa e una regolazione una tantum: non e una sincronizzazione
+NTP continua e non certifica l'esattezza dell'ora UTC di Ubuntu.
+Non modifica l'orologio Ubuntu, i fusi orari o le regole del firewall.
 
-1. OPNSENSE - CONSOLE ROOT
-Verifica le due regole NTP effettivamente attive:
+1. FERMA L'ORCHESTRATORE SU WINDOWS-HR.
+La correzione dell'ora va fatta PRIMA di avviare una nuova sessione.
 
-pfctl -sr | grep 'proto udp' | grep -E 'port = (ntp|123)'
+2. SU WINDOWS-HR APRI WINDOWS POWERSHELL COME AMMINISTRATORE.
+Copia e incolla TUTTO il blocco seguente, da & { fino all'ultima }.
+La password SSH viene richiesta dal client: non inserirla nel testo.
+Il comando remoto date legge l'ora dopo l'autenticazione, quindi il tempo
+impiegato a digitare la password non viene copiato come errore di orologio.
 
-Devono comparire i pass per 10.0.40.13 su vlan0.40 e per 10.0.99.14
-su vlan0.99. Se non compaiono, inviare il risultato prima di proseguire.
+& {
+    $righeOra = @(ssh.exe -T wazuh@10.0.99.14 'date -u +%s')
+    if ($LASTEXITCODE -ne 0) { throw 'Lettura SSH fallita: ora Windows non modificata.' }
+    $testoOra = ($righeOra -join '').Trim()
+    [long]$secondiUnix = 0
+    if (-not [long]::TryParse($testoOra, [ref]$secondiUnix)) { throw 'Risposta oraria non valida: ora Windows non modificata.' }
+    if ($secondiUnix -lt 946684800 -or $secondiUnix -gt 4102444800) { throw 'Data del server fuori intervallo: ora Windows non modificata.' }
+    $oraServer = [DateTimeOffset]::FromUnixTimeSeconds($secondiUnix)
+    Set-Date -Date $oraServer.LocalDateTime -ErrorAction Stop | Out-Null
+    Write-Output ('Windows UTC: ' + (Get-Date).ToUniversalTime().ToString('o'))
+}
 
-2. OPNSENSE - CONSOLE ROOT
-Avvia la cattura sulla WAN vtnet0 (come indicata dal NAT mostrato):
+Il blocco cambia realmente l'ora Windows. Non eseguirlo durante una raccolta.
+Se compare un errore, fermati e conserva il messaggio.
 
-tcpdump -ni vtnet0 'udp port 123'
+3. CONFRONTA NUOVAMENTE LE ORE, SEMPRE DA WINDOWS POWERSHELL.
+Questo blocco legge soltanto. Copiarlo interamente.
 
-Lascia aperta questa console. Il comando osserva il traffico, non modifica
-regole e non imposta gli orologi. Arrestarlo dopo la prova con Ctrl+C.
+& {
+    Write-Output 'Ubuntu UTC:'
+    ssh.exe -T wazuh@10.0.99.14 'date -u +%Y-%m-%dT%H:%M:%SZ'
+    if ($LASTEXITCODE -ne 0) { throw 'Verifica SSH fallita.' }
+    Write-Output ('Windows UTC: ' + (Get-Date).ToUniversalTime().ToString('o'))
+}
 
-3. WINDOWS-HR - NUOVA FINESTRA WINDOWS POWERSHELL
-Con la cattura OPNsense ancora attiva, richiedi campioni:
+Le ore UTC dovrebbero differire di pochi secondi al massimo su una rete locale.
+Non e una garanzia di precisione NTP: c'e il ritardo di trasporto/elaborazione.
+Se resta uno scarto grande, non avviare il test e invia l'output.
 
-w32tm.exe /stripchart /computer:time.windows.com /dataonly /samples:5
+4. DOPO LA VERIFICA, AVVIA UNA NUOVA SESSIONE CON AVVIA.cmd.
+Attendi il minuto iniziale, esegui i comandi di prova, poi STOP ed esportazione.
+Confronta anche agent_id nel config con quello degli alert reali Windows-HR.
 
-Poi prova il servizio Windows Time:
+Non usare /resync per questa procedura: l'accesso NTP esterno resta un
+problema separato. Le regole NTP gia aggiunte possono restare configurate.
+Questo allineamento non corregge i timestamp dei log o delle sessioni vecchie.
+Per prove lunghe servira una sorgente oraria stabile e raggiungibile.
+Prima e dopo ogni sessione verifica che le due VM siano ancora allineate.
 
-w32tm.exe /resync /rediscover
-
-4. TORNA SU OPNSENSE
-Premi Ctrl+C dopo la fine delle prove e invia le righe della cattura,
-insieme al risultato delle regole del punto 1 e dei comandi Windows.
-
-Interpretazione indicativa:
-- Richieste in uscita sulla WAN ma nessuna risposta: verificare il percorso
-  a monte, il NAT mostrato e il server remoto. Non prova da solo quale
-  dispositivo stia bloccando il traffico.
-- Nessun pacchetto sulla WAN: controllare regole, sorgente IP e percorso
-  effettivo attraverso OPNsense.
-- Richieste e risposte: verificare ritorno alla VM e servizio Windows Time.
-- stripchart funziona ma resync no: non trattare il problema come semplice
-  assenza di connettivita; i due usano porte sorgenti e controlli diversi.
-
-Non disabilitare il firewall, non svuotare gli stati e non cambiare il NAT
-alla cieca. Nessun file di configurazione viene modificato da questi comandi.
