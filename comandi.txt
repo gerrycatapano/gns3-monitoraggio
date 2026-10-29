@@ -194,3 +194,64 @@ Questo allineamento non corregge i timestamp dei log o delle sessioni vecchie.
 Per prove lunghe servira una sorgente oraria stabile e raggiungibile.
 Prima e dopo ogni sessione verifica che le due VM siano ancora allineate.
 
+
+
+ORARIO LOCALE E UTC - NON SPOSTARE DI NUOVO GLI OROLOGI
+
+Windows alle 04:36 AM puo gia essere allineato a Ubuntu alle 11:36 UTC
+se il fuso Windows e UTC-7. Il fuso cambia la visualizzazione, non l'istante UTC.
+Non copiare l'orario locale di una macchina sull'altra.
+Ferma l'orchestratore durante la verifica/configurazione.
+
+1. WINDOWS-HR - WINDOWS POWERSHELL COME AMMINISTRATORE
+Mostra il fuso prima della modifica:
+
+Get-TimeZone
+
+Imposta il fuso italiano (non cambia l'istante UTC dell'orologio):
+
+Set-TimeZone -Id 'W. Europe Standard Time'
+
+Mostra ora locale e UTC:
+
+Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz'
+
+(Get-Date).ToUniversalTime().ToString('o')
+
+2. UBUNTU WAZUH - TERMINALE LINUX
+Imposta lo stesso fuso italiano:
+
+sudo timedatectl set-timezone Europe/Rome
+
+Mostra ora locale e UTC:
+
+date --iso-8601=seconds
+
+date -u --iso-8601=seconds
+
+3. CONFRONTO DIRETTO VIA SSH, DA WINDOWS-HR
+Il blocco seguente NON cambia l'ora: confronta l'orologio del manager
+con quello Windows, indipendentemente dal fuso. Copialo interamente.
+
+& {
+    $righeConfronto = @(ssh.exe -T wazuh@10.0.99.14 'date -u +%s')
+    if ($LASTEXITCODE -ne 0) { throw 'Verifica SSH fallita.' }
+    [long]$epochUbuntu = 0
+    if (-not [long]::TryParse(($righeConfronto -join '').Trim(), [ref]$epochUbuntu)) { throw 'Risposta oraria non valida.' }
+    $epochWindows = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    Write-Output ('Ubuntu UTC: ' + [DateTimeOffset]::FromUnixTimeSeconds($epochUbuntu).UtcDateTime.ToString('o'))
+    Write-Output ('Windows UTC: ' + [DateTimeOffset]::FromUnixTimeSeconds($epochWindows).UtcDateTime.ToString('o'))
+    Write-Output ('Scarto Windows - Ubuntu (secondi, incluso ritardo SSH): ' + ($epochWindows - $epochUbuntu))
+}
+
+Se lo scarto e di pochi secondi, le VM sono allineate per la prova breve:
+non eseguire altri Set-Date. Riparti con una NUOVA sessione dell'orchestratore.
+Se lo scarto e ancora di ore, invia queste tre righe: non invertire la copia.
+
+NOTA
+Il fuso orario impostato resta configurato dopo il riavvio.
+Questo non crea una sorgente NTP continua: il precedente allineamento SSH
+e una regolazione una tantum. Per stabilita nel tempo servira un server NTP
+raggiungibile, interno o esterno, e la verifica della sorgente delle VM.
+Non e possibile certificare l'ora reale solo copiando un orologio sull'altro.
+
