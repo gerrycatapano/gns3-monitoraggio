@@ -64,6 +64,38 @@ Se restano ore di differenza, invia gli output prima di fare altre modifiche.
 
 4. NUOVA PROVA
 
+
+
+
+IDENTIFICARE LA SORGENTE ORARIA - COMANDI DI SOLA LETTURA
+
+WINDOWS-HR - WINDOWS POWERSHELL
+
+1. Verifica se la macchina appartiene a un dominio:
+
+Get-CimInstance Win32_ComputerSystem | Select-Object Name, PartOfDomain, Domain
+
+2. Mostra configurazione e sorgenti del servizio orario:
+
+w32tm.exe /query /configuration
+
+w32tm.exe /query /peers
+
+UBUNTU WAZUH MANAGER - TERMINALE UBUNTU
+
+3. Mostra la sorgente e lo stato del servizio systemd-timesyncd, se disponibile:
+
+timedatectl timesync-status
+
+Se il comando segnala che systemd-timesyncd non e disponibile, esegui:
+
+systemctl list-units --type=service --all | grep -Ei 'timesync|chrony|ntp'
+
+Inviare i risultati. Non impostare Ubuntu come server NTP di Windows senza
+aver configurato un vero servizio NTP server: SSH e NTP sono servizi diversi.
+Non sostituire la sorgente di dominio con server Internet prima di verificare
+l'appartenenza al dominio e la raggiungibilita della sorgente autorizzata del laboratorio.
+
 Solo dopo aver verificato l'allineamento, avvia una NUOVA sessione con AVVIA.cmd,
 attendi il controllo iniziale, esegui i comandi di discovery e usa STOP.
 La correzione non riscrive i timestamp delle sessioni o degli alert gia prodotti.
