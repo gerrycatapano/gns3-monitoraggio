@@ -29,6 +29,11 @@ try {
     if (count($interfaces) !== 2) {
         stop_now('Non trovate entrambe le interfacce vlan0.40 e vlan0.99. Nessuna modifica.');
     }
+    echo "VERSION=2_ADD_HOST_NTP\n";
+    if (!isset($xml->filter)) {
+        stop_now('Sezione filter legacy assente. Nessuna modifica.');
+    }
+    $hosts = ['vlan0.40' => '10.0.40.13', 'vlan0.99' => '10.0.99.14'];
     $selected = [];
     $sshPersistent = false;
     foreach ($xml->filter->rule as $rule) {
@@ -52,10 +57,10 @@ try {
             $sshPersistent = true;
         }
         foreach ($interfaces as $device => $logical) {
-            if ($iface === $logical && in_array($proto, ['tcp', 'udp'], true) &&
+            if ($iface === $logical && $proto === 'udp' &&
                 in_array($port, ['123', 'ntp'], true) &&
                 trim((string)$rule->ipprotocol) === 'inet' &&
-                trim((string)$rule->source->network) === $logical &&
+                trim((string)$rule->source->address) === $hosts[$device] &&
                 isset($rule->destination->any) &&
                 !isset($rule->source->not) && !isset($rule->destination->not)) {
                 $selected[$device][] = $rule;
@@ -63,11 +68,10 @@ try {
         }
     }
     foreach ($interfaces as $device => $logical) {
-        if (count($selected[$device] ?? []) !== 1) {
-            stop_now('Attesa una sola regola NTP IPv4 di rete su ' . $device . '. Nessuna modifica.');
+        if (count($selected[$device] ?? []) > 1) {
+            stop_now('Piu regole NTP dedicate equivalenti su ' . $device . '. Verificare prima di modificare.');
         }
-        $rule = $selected[$device][0];
-        printf("NTP %s (%s): %s -> udp; porta e indirizzi invariati\n", $device, $logical, (string)$rule->protocol);
+        printf("NTP %s (%s): %s -> any UDP 123: %s\n", $device, $logical, $hosts[$device], empty($selected[$device]) ? 'DA AGGIUNGERE' : 'GIA PRESENTE');
     }
     echo 'SSH persistente 10.0.40.13 -> 10.0.99.14:22: ' . ($sshPersistent ? 'presente' : 'assente') . "\n";
     if (!$apply) {
@@ -96,8 +100,28 @@ try {
         stop_now('Backup non riuscito. Nessun salvataggio.');
     }
     echo "BACKUP=$backup\n";
-    foreach ($selected as $rules) {
-        $rules[0]->protocol = 'udp';
+    foreach ($interfaces as $device => $logical) {
+        if (!empty($selected[$device])) {
+            continue;
+        }
+        $new = $xml->filter->addChild('rule');
+        $new->addChild('type', 'pass');
+        $new->addChild('interface', $logical);
+        $new->addChild('ipprotocol', 'inet');
+        $new->addChild('protocol', 'udp');
+        $new->addChild('direction', 'in');
+        $new->addChild('log', '1');
+        $source = $new->addChild('source');
+        $source->addChild('address', $hosts[$device]);
+        $destination = $new->addChild('destination');
+        $destination->addChild('any');
+        $destination->addChild('port', '123');
+        $new->addChild('descr', 'GNS3 NTP UDP 123 for host ' . $hosts[$device]);
+        $node = dom_import_simplexml($new);
+        $firstRule = dom_import_simplexml($xml->filter->rule[0]);
+        if ($node !== $firstRule) {
+            $node->parentNode->insertBefore($node, $firstRule);
+        }
     }
     if (!$sshPersistent) {
         $new = $xml->filter->addChild('rule');
@@ -122,7 +146,7 @@ try {
     if (!$manager->isValid()) {
         stop_now('Modello configurazione non valido. Nessun salvataggio.');
     }
-    $manager->save(['description' => 'GNS3: correct HR/Wazuh NTP to UDP; preserve existing SSH access']);
+    $manager->save(['description' => 'GNS3: add host-specific NTP UDP rules; preserve existing SSH access']);
     $manager->unlock();
     $disk = simplexml_load_file('/conf/config.xml');
     if ($disk === false) {
