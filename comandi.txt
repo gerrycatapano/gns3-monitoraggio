@@ -1,49 +1,40 @@
-VERIFICA RACCOLTA WAZUH - DOPO LA CONFERMA DEGLI EVENTI LOCALI
+PROVA ALERT IN DIRETTA - SENZA FILTRI DI ORARIO O AGENTE
 
-Eseguire un comando alla volta, nella macchina indicata.
-Tutti i controlli seguenti sono di lettura/test: non modificano le configurazioni.
-Non incollare l'intero documento in un terminale.
+Non avviare l'orchestratore per questa prova: controlliamo prima il percorso Windows -> Wazuh.
+Non cambia configurazioni. Le attivita Windows creano normalmente processi ed eventi.
 
-A. WINDOWS-HR - WINDOWS POWERSHELL COME AMMINISTRATORE
+1. UBUNTU WAZUH MANAGER
+Apri un terminale ed esegui il comando. Lascialo aperto.
+Mostra TUTTI i nuovi alert, anche quelli non relativi alla prova.
 
-1. Mostra i blocchi locali di raccolta. Controllare che siano presenti i due canali:
-Microsoft-Windows-Sysmon/Operational
-Microsoft-Windows-PowerShell/Operational
-Controllare anche eventuali query che escludono gli eventi 1 o 4103.
+sudo tail -n 0 -F /var/ossec/logs/alerts/alerts.json
 
-Select-String -LiteralPath 'C:\Program Files (x86)\ossec-agent\ossec.conf' -Pattern '<localfile>' -Context 0,15
+2. WINDOWS-HR
+Apri una NUOVA finestra Windows PowerShell.
+Esegui i comandi uno alla volta dopo aver avviato il controllo Ubuntu.
 
-2. Stato del servizio agente:
+tasklist.exe
 
-Get-Service | Where-Object { $_.Name -match 'wazuh|ossec' -or $_.DisplayName -match 'wazuh|ossec' } | Format-Table Name, DisplayName, Status
+sc.exe query
 
-3. Ultime righe del log agente. Il file puo contenere indirizzi della rete: non pubblicarlo su GitHub.
+ipconfig.exe /all
 
-Get-Content -LiteralPath 'C:\Program Files (x86)\ossec-agent\ossec.log' -Tail 80
+whoami.exe
 
-4. Ora Windows in UTC:
+Get-Service | Select-Object -First 5
 
-(Get-Date).ToUniversalTime().ToString('o')
+3. OSSERVA UBUNTU
+Attendi circa 60 secondi dopo i comandi.
+Cerca nelle righe il nome/ID agente Windows-HR e riferimenti alle attivita eseguite.
+Non assumere che ogni comando debba selezionare esattamente un particolare ID regola.
+Ferma soltanto la visualizzazione con Ctrl+C. Non ferma il servizio Wazuh.
 
-B. UBUNTU WAZUH MANAGER - TERMINALE UBUNTU
+RISULTATO DA COMUNICARE
+- Compaiono alert della macchina HR associati alla prova?
+- Compaiono solo alert di altre macchine/altre attivita?
+- Non compare alcuna nuova riga?
 
-5. Controlla la configurazione del motore regole. Conservare anche eventuali warning su ID duplicati.
-
-sudo /var/ossec/bin/wazuh-analysisd -t
-
-6. Verifica che le regole custom esistano nella cartella delle regole locali.
-Questo controllo prova la presenza dei file, non che siano stati caricati dal processo attualmente in esecuzione.
-
-sudo grep -R -n -E 'id="(100105|100203|100312)"' /var/ossec/etc/rules
-
-7. Ora Ubuntu in UTC:
-
-date -u --iso-8601=seconds
-
-RISULTATI
-
-Inviare i risultati dei punti 1, 2, 3, 5 e 6.
-Confrontare i punti 4 e 7 eseguiti a breve distanza.
-Gli orari locali possono differire per fuso; quelli UTC dovrebbero essere allineati.
-Non abilitare archives o modificare filtri/regole prima di valutare questi risultati.
-I controlli non diagnosticano gli scanner pe-sieve/Moneta, che sono un percorso separato.
+Se la prova produce alert, il percorso di detection funziona e si passa a correggere
+orologi e filtri dell'esportazione. Se non li produce, controllare ricezione/decodifica
+ed effettiva selezione delle regole: la validazione analysisd -t non dimostra
+che uno specifico evento sia arrivato o abbia generato un alert.
