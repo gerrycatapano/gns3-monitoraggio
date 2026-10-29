@@ -1,0 +1,58 @@
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force
+
+Get-ChildItem .\sensors -Filter *.ps1 -File |
+    Unblock-File
+
+Unblock-File -LiteralPath "C:\Tools\pe-sieve64.exe"
+Unblock-File -LiteralPath "C:\Tools\Moneta64.exe"
+
+
+per togliere
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy Undefined
+
+
+$base = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell"
+
+# Module Logging: eventi 4103
+New-Item -Path "$base\ModuleLogging" -Force | Out-Null
+
+New-ItemProperty -Path "$base\ModuleLogging" `
+    -Name "EnableModuleLogging" `
+    -PropertyType DWord -Value 1 -Force | Out-Null
+
+New-Item -Path "$base\ModuleLogging\ModuleNames" -Force | Out-Null
+
+New-ItemProperty -Path "$base\ModuleLogging\ModuleNames" `
+    -Name "*" `
+    -PropertyType String -Value "*" -Force | Out-Null
+
+# Script Block Logging: eventi 4104
+New-Item -Path "$base\ScriptBlockLogging" -Force | Out-Null
+
+New-ItemProperty -Path "$base\ScriptBlockLogging" `
+    -Name "EnableScriptBlockLogging" `
+    -PropertyType DWord -Value 1 -Force | Out-Null
+
+# Abilita il canale operativo
+wevtutil.exe sl "Microsoft-Windows-PowerShell/Operational" /e:true
+
+
+
+prove
+Get-Process | Select-Object -First 5
+Get-Service | Select-Object -First 5
+Get-ChildItem -LiteralPath C:\Users
+
+
+
+per ssh
+
+cp /tmp/rules.debug /tmp/rules.ssh.backup
+
+awk 'BEGIN{r="pass in quick on vlan0.40 inet proto tcp from 10.0.40.13 to 10.0.99.14 port 22 keep state"} done==0 && ($1=="pass" || $1=="block"){print r;done=1} {print}' /tmp/rules.ssh.backup > /tmp/rules.ssh.temp
+
+grep '10.0.40.13' /tmp/rules.ssh.temp
+
+pfctl -nf /tmp/rules.ssh.temp && pfctl -f /tmp/rules.ssh.temp
+
+Test-NetConnection 10.0.99.14 -Port 22
